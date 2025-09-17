@@ -79,9 +79,9 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
 
 # Configure API keys
-GOOGLE_API_KEY = "AIzaSyCpKQjsHYkK7fXlKee_8uS3AOso4sXZxRY"
-EXA_API_KEY = "3a9b504c-8e80-4b14-94a5-c0dc160c3edf"
-DEEPGRAM_API_KEY = "a1afcf07366e43d872cf861f4eefe4a27266b5d0"
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+EXA_API_KEY = os.getenv('EXA_API_KEY')
+DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
 deepgram = DeepgramClient(DEEPGRAM_API_KEY)
 
 # Configure Gemini API
@@ -123,7 +123,7 @@ Throughout the seminar, support Ahad seamlessly while ensuring your interactions
 '''
 
 model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash-latest",
+    model_name="gemini-2.5-flash",
     generation_config=generation_config,
     system_instruction=system_instruction
 )
@@ -143,7 +143,7 @@ def initialize_face_recognition():
 # Setting up RAG
 def initialize_model():
     return ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash-latest",
+        model="gemini-2.5-flash",
         google_api_key=GOOGLE_API_KEY,
         temperature=0.2,
         convert_system_message_to_human=True
