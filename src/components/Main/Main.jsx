@@ -271,14 +271,8 @@ const Main = () => {
   }, [audioMode]);
 
   useEffect(() => {
-    if (isRecording) {
-      setAudioViewState('listening');
-    } else if (isAIProcessing) {
-      setAudioViewState('processing');
-    } else {
-      setAudioViewState('idle');
-    }
-  }, [isRecording, isAIProcessing]);
+    setAudioViewState(isRecording ? 'listening' : 'idle');
+  }, [isRecording]);
 
   return (
     <div className='main'>
@@ -364,11 +358,7 @@ const Main = () => {
         <ModernBlueWaveform />
       </div>
     )}
-    {audioViewState === 'processing' && (
-      <div style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%'}}>
-        <AIProcessingAnimation />
-      </div>
-    )}
+        {/* processing view removed for continuous listening */}
     <div className={`audio-mode-buttons ${showButtons ? '' : 'hide'}`}>
         <AudioModeButton
               icon={assets.screenshare}

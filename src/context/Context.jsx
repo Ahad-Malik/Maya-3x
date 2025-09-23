@@ -1,5 +1,7 @@
 import React, { createContext, useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
+import { RealtimeAgent, RealtimeSession } from "@openai/agents/realtime";
+import { connectViaEphemeral, connectViaUnified, destroyRealtimeConnection } from "../utils/realtimeWebRTC";
 
 export const Context = createContext();
 
@@ -21,6 +23,12 @@ const ContextProvider = (props) => {
     const [isRecording, setIsRecording] = useState(false);
     const mediaRecorderRef = useRef(null);
     const recordedChunksRef = useRef([]);
+    // Remove SDK session path to avoid double connections; raw WebRTC handles start/stop cleanly
+    const realtimeAgentRef = useRef(null);
+    const realtimeSessionRef = useRef(null);
+    const rtcPeerRef = useRef(null);
+    const rtcAudioElRef = useRef(null);
+    const rtcLocalStreamRef = useRef(null);
     const [audioTranscript, setAudioTranscript] = useState('');
     const [modelResponse, setModelResponse] = useState('');
     const recordingTimeoutRef = useRef(null);
@@ -124,85 +132,69 @@ const ContextProvider = (props) => {
         }
     };
 
-    const processAudioWithMode = async (audioBlob, mode) => {       
-        if (!sessionIdRef.current) {
-            console.log('No session ID available for audio processing. Starting a new chat session.');
-            await startChat();
-            while (!sessionIdRef.current) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        }
-
-        setIsAIProcessing(true);
-        const formData = new FormData();
-        formData.append('audio', audioBlob);
-        formData.append('session_id', sessionIdRef.current);
-        formData.append('mode', mode);
-        
-        try {
-            const response = await axios.post('http://127.0.0.1:5000/process-audio', formData, {
-                responseType: 'blob'
-            });
-            const audioUrl = URL.createObjectURL(response.data);
-            new Audio(audioUrl).play();
-            
-            const resultResponse = await axios.get('http://127.0.0.1:5000/get-result', {
-                params: { session_id: sessionIdRef.current }
-            });
-            setAudioTranscript(resultResponse.data.query);
-            setModelResponse(resultResponse.data.response);
-            setResultData(resultResponse.data.response);
-            getChatHistory(sessionIdRef.current);
-        } catch (error) {
-            if (error.response && error.response.status === 404) {
-                console.log('Session not found during audio processing. Starting a new chat session.');
-                await startChat();
-                return processAudioWithMode(audioBlob, mode);
-            }
-            console.error('Voice processing failed:', error);
-            setResultData("Failed to process voice. Please try again.");
-        } finally {
-            setLoading(false);
-            setIsAIProcessing(false);
-        }
+    const processAudioWithMode = async () => {
+        // Deprecated: replaced by Realtime API streaming
+        console.warn('processAudioWithMode is no longer used; Realtime API handles audio directly.');
     };
 
-    const startRecording = async () => {
+    const connectRealtime = useCallback(async () => {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorderRef.current = new MediaRecorder(stream);
-            mediaRecorderRef.current.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    recordedChunksRef.current.push(event.data);
-                }
-            };
-            mediaRecorderRef.current.onstop = () => {
-                const audioBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-                let mode = 'chat';
-                if (visionMode) mode = 'vision';
-                else if (screenshareMode) mode = 'screenshare';
-                else if (powerSearchMode) mode = 'supersearch';
-                processAudioWithMode(audioBlob, mode);
-                recordedChunksRef.current = [];
-            };
-            mediaRecorderRef.current.start();
+            // Prefer raw WebRTC path (simpler stop/cleanup)
+            const { pc, audioEl, localStream } = await connectViaEphemeral();
+            rtcPeerRef.current = pc;
+            rtcAudioElRef.current = audioEl;
+            rtcLocalStreamRef.current = localStream;
             setIsRecording(true);
-            recordingTimeoutRef.current = setTimeout(() => {
-                stopRecording();
-            }, 10000);
             setResultData("Listening...");
         } catch (error) {
-            console.error('Failed to start listening:', error);
+            console.error('Failed to connect Realtime session via Agents SDK, falling back to raw WebRTC:', error);
+            // Fallback to raw WebRTC using ephemeral token
+            try {
+                const { pc, audioEl, localStream } = await connectViaEphemeral();
+                rtcPeerRef.current = pc;
+                rtcAudioElRef.current = audioEl;
+                rtcLocalStreamRef.current = localStream;
+                setIsRecording(true);
+                setResultData("Listening...");
+            } catch (e2) {
+                console.error('Raw WebRTC fallback failed:', e2);
+                setIsRecording(false);
+            }
         }
+    }, []);
+
+    const disconnectRealtime = useCallback(async () => {
+        try {
+            if (realtimeSessionRef.current) {
+                await realtimeSessionRef.current.disconnect?.();
+                realtimeSessionRef.current = null;
+            }
+            if (rtcPeerRef.current || rtcAudioElRef.current || rtcLocalStreamRef.current) {
+                destroyRealtimeConnection({
+                    pc: rtcPeerRef.current,
+                    audioEl: rtcAudioElRef.current,
+                    localStream: rtcLocalStreamRef.current,
+                });
+                rtcPeerRef.current = null;
+                rtcAudioElRef.current = null;
+                rtcLocalStreamRef.current = null;
+            }
+        } catch (error) {
+            console.error('Error disconnecting Realtime session:', error);
+        } finally {
+            setIsRecording(false);
+            clearTimeout(recordingTimeoutRef.current);
+            setResultData(""); // Clear "Listening..." text
+        }
+    }, []);
+
+    const startRecording = async () => {
+        // Switch to audio mode UI states
+        await connectRealtime();
     };
 
     const stopRecording = () => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-            mediaRecorderRef.current.stop();
-            setIsRecording(false);
-            clearTimeout(recordingTimeoutRef.current);
-            setResultData("Processing...");
-        }
+        disconnectRealtime();
     };
 
     const onSent = async () => {

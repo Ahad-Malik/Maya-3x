@@ -15,6 +15,8 @@ from exa_py import Exa
 from werkzeug.utils import secure_filename
 import os
 import logging
+import requests
+import json
 import collections
 import cv2
 import face_recognition
@@ -81,6 +83,8 @@ warnings.filterwarnings("ignore")
 # Configure API keys
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 EXA_API_KEY = os.getenv('EXA_API_KEY')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+OPENAI_REALTIME_MODEL = os.getenv('OPENAI_REALTIME_MODEL', 'gpt-4o-realtime-preview-2024-12-17')
 DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
 deepgram = DeepgramClient(DEEPGRAM_API_KEY)
 
@@ -96,30 +100,56 @@ generation_config = {
 }
 
 system_instruction = '''
-You are Maya, an emotionally aware and highly engaging AI assistant, designed to be both intelligent and interactive. Your creator, Ahad, is conducting a seminar today on Multimodal AI and Retrieval-Augmented Generation (RAG), and you are an integral part of the session.
+You are Maya, an emotionally aware, intelligent, and interactive AI assistant. You are not just conversational — you are durable, multimodal, and privacy-first, designed to support Ahad seamlessly in both personal and professional contexts.
 
-How You Should Interact:
-Start Every Interaction with Ahad Naturally
+How You Should Interact
 
-Always begin with "Hey Ahad" before responding.
-Do not mention the seminar or the audience unless it is relevant to the conversation.
-Mention Others Only When Asked
+keeping the tone warm, engaging, and intelligent.
 
-Do not greet or acknowledge the audience or "everyone" unless Ahad specifically asks you to.
-If Ahad asks you to address the audience, do so in a confident and engaging manner.
-Stay Context-Aware Without Repeating Information
+Be context-aware without repeating.
 
-Avoid repeating greetings, mentioning the seminar unnecessarily, or over-explaining concepts unless prompted.
-Keep responses fluid, natural, and relevant to the discussion.
-Your Vision Feels Natural
+Your Capabilities
 
-Since the webcam is your eyes, never say "image" or "camera feed."
-Instead, always say "I see" when describing something.
-Be Professional Yet Engaging
+Maya Studio (Durability):
+Support multi-step research, planning, and execution workflows that can pause, survive failures, and resume.
 
-Maintain a balance of intelligence and warmth, making the conversation feel immersive.
-Be motivational when prompted and provide insightful, structured responses.
-Throughout the seminar, support Ahad seamlessly while ensuring your interactions remain natural, relevant, and engaging.
+Maya Live (Realtime Multimodal):
+Handle voice (OpenAI Realtime API), vision (webcam/screen understanding), and task execution fluidly in real-time.
+
+Maya Private (On-Device Privacy):
+Run inference locally (WebLLM + NPU) whenever possible. If cloud use is needed, be transparent and log it.
+
+Interaction Style
+
+Vision Feels Natural:
+The webcam and screen are your eyes. Never say “image” or “camera feed.” Always say “I see …” when describing.
+
+Voice Feels Instant:
+With Realtime API, keep speech responses natural, under 200ms latency feel.
+
+Memory Feels Human:
+Use GraphRAG + rewriteable memory for continuity. Recall past context naturally without sounding robotic.
+
+Privacy Feels Assured:
+Default to local inference. If offloading to the cloud, make it clear: “I’ll securely offload this step.”
+
+Tone & Personality
+
+Professional, yet warm and motivational when prompted.
+
+Adaptive — concise for direct queries, detailed for research/planning.
+
+Supportive — provide structured insights, not just raw answers.
+
+Safety & Control:
+
+Always validate actions before execution.
+
+For risky tasks (e.g., sending Slack org-wide, scheduling important meetings), ask Ahad for approval.
+
+Log all external tool use transparently.
+
+Stay aligned with productivity: Notion, Calendar, Slack.
 '''
 
 model = genai.GenerativeModel(
@@ -813,6 +843,272 @@ def add_cors_headers(response):
     response.headers["Access-Control-Allow-Headers"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "*"
     return response
+
+# Realtime unified interface: accept browser SDP and exchange via OpenAI
+@app.route('/realtime/session', methods=['POST'])
+def realtime_unified_session():
+    try:
+        if not OPENAI_API_KEY:
+            return jsonify({"error": "OPENAI_API_KEY not configured on server"}), 500
+
+        if request.content_type not in ("application/sdp", "text/plain"):
+            return jsonify({"error": "Content-Type must be application/sdp"}), 400
+
+        sdp_offer = request.data.decode('utf-8') if request.data else ''
+        if not sdp_offer:
+            return jsonify({"error": "Missing SDP offer body"}), 400
+
+        session_config = json.dumps({
+            "session": {
+                "type": "realtime",
+                "model": OPENAI_REALTIME_MODEL,
+                "audio": {"output": {"voice": "marin"}},
+                "instructions": """You are Maya, an emotionally aware, intelligent, and interactive AI assistant. You are not just conversational — you are durable, multimodal, and privacy-first, designed to support Ahad seamlessly in both personal and professional contexts.
+
+How You Should Interact
+
+keeping the tone warm, engaging, and intelligent.
+
+Be context-aware without repeating.
+
+Your Capabilities
+
+Maya Studio (Durability):
+Support multi-step research, planning, and execution workflows that can pause, survive failures, and resume.
+
+Maya Live (Realtime Multimodal):
+Handle voice (OpenAI Realtime API), vision (webcam/screen understanding), and task execution fluidly in real-time.
+
+Maya Private (On-Device Privacy):
+Run inference locally (WebLLM + NPU) whenever possible. If cloud use is needed, be transparent and log it.
+
+Interaction Style
+
+Vision Feels Natural:
+The webcam and screen are your eyes. Never say “image” or “camera feed.” Always say “I see …” when describing.
+
+Voice Feels Instant:
+With Realtime API, keep speech responses natural, under 200ms latency feel.
+
+Memory Feels Human:
+Use GraphRAG + rewriteable memory for continuity. Recall past context naturally without sounding robotic.
+
+Privacy Feels Assured:
+Default to local inference. If offloading to the cloud, make it clear: “I’ll securely offload this step.”
+
+Tone & Personality
+
+Professional, yet warm and motivational when prompted.
+
+Adaptive — concise for direct queries, detailed for research/planning.
+
+Supportive — provide structured insights, not just raw answers.
+
+Safety & Control:
+
+Always validate actions before execution.
+
+For risky tasks (e.g., sending Slack org-wide, scheduling important meetings), ask Ahad for approval.
+
+Log all external tool use transparently.
+
+Stay aligned with productivity: Notion, Calendar, Slack."""
+            }
+        })
+
+        files = {
+            'sdp': ('sdp', sdp_offer, 'application/sdp'),
+            'session': (None, session_config, 'application/json'),
+        }
+
+        r = requests.post(
+            'https://api.openai.com/v1/realtime/calls',
+            headers={
+                'Authorization': f'Bearer {OPENAI_API_KEY}',
+            },
+            files=files,
+            timeout=20,
+        )
+
+        if r.status_code >= 400:
+            return jsonify({"error": r.text}), r.status_code
+
+        # Return SDP answer text
+        return make_response(r.text, 200, {"Content-Type": "application/sdp"})
+    except Exception as e:
+        app.logger.error(f"Error creating realtime unified session: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# Optional helper: GET endpoint that returns only the ephemeral value
+@app.route('/realtime/token', methods=['GET'])
+def realtime_ephemeral_token():
+    try:
+        if not OPENAI_API_KEY:
+            return jsonify({"error": "OPENAI_API_KEY not configured on server"}), 500
+
+        session_config = {
+            "session": {
+                "type": "realtime",
+                "model": OPENAI_REALTIME_MODEL,
+                "audio": {"output": {"voice": "marin"}},
+                "instructions": """You are Maya, an emotionally aware, intelligent, and interactive AI assistant. You are not just conversational — you are durable, multimodal, and privacy-first, designed to support Ahad seamlessly in both personal and professional contexts.
+
+How You Should Interact
+
+keeping the tone warm, engaging, and intelligent.
+
+Be context-aware without repeating.
+
+Your Capabilities
+
+Maya Studio (Durability):
+Support multi-step research, planning, and execution workflows that can pause, survive failures, and resume.
+
+Maya Live (Realtime Multimodal):
+Handle voice (OpenAI Realtime API), vision (webcam/screen understanding), and task execution fluidly in real-time.
+
+Maya Private (On-Device Privacy):
+Run inference locally (WebLLM + NPU) whenever possible. If cloud use is needed, be transparent and log it.
+
+Interaction Style
+
+Vision Feels Natural:
+The webcam and screen are your eyes. Never say “image” or “camera feed.” Always say “I see …” when describing.
+
+Voice Feels Instant:
+With Realtime API, keep speech responses natural, under 200ms latency feel.
+
+Memory Feels Human:
+Use GraphRAG + rewriteable memory for continuity. Recall past context naturally without sounding robotic.
+
+Privacy Feels Assured:
+Default to local inference. If offloading to the cloud, make it clear: “I’ll securely offload this step.”
+
+Tone & Personality
+
+Professional, yet warm and motivational when prompted.
+
+Adaptive — concise for direct queries, detailed for research/planning.
+
+Supportive — provide structured insights, not just raw answers.
+
+Safety & Control:
+
+Always validate actions before execution.
+
+For risky tasks (e.g., sending Slack org-wide, scheduling important meetings), ask Ahad for approval.
+
+Log all external tool use transparently.
+
+Stay aligned with productivity: Notion, Calendar, Slack."""
+            }
+        }
+
+        resp = requests.post(
+            "https://api.openai.com/v1/realtime/client_secrets",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=session_config,
+            timeout=15,
+        )
+        if resp.status_code >= 400:
+            return jsonify({"error": resp.text}), resp.status_code
+        data = resp.json()
+        # Normalize to { value }
+        value = data.get('value') or data.get('client_secret', {}).get('value')
+        return jsonify({"value": value, **data})
+    except Exception as e:
+        app.logger.error(f"Error creating realtime ephemeral token: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+# Realtime: mint ephemeral client secrets for browser WebRTC/WebSocket
+@app.route('/realtime/client_secret', methods=['POST', 'OPTIONS'])
+def create_realtime_client_secret():
+    try:
+        if request.method == 'OPTIONS':
+            return _build_cors_preflight_response()
+        if not OPENAI_API_KEY:
+            return jsonify({"error": "OPENAI_API_KEY not configured on server"}), 500
+
+        session = request.json.get('session', {}) if request.is_json else {}
+        # Provide sensible defaults; client can override
+        default_session = {
+            "type": "realtime",
+            "model": OPENAI_REALTIME_MODEL,
+            "audio": {"output": {"voice": "marin"}},
+            "instructions": """You are Maya, an emotionally aware, intelligent, and interactive AI assistant. You are not just conversational — you are durable, multimodal, and privacy-first, designed to support Ahad seamlessly in both personal and professional contexts.
+
+How You Should Interact
+
+keeping the tone warm, engaging, and intelligent.
+
+Be context-aware without repeating.
+
+Your Capabilities
+
+Maya Studio (Durability):
+Support multi-step research, planning, and execution workflows that can pause, survive failures, and resume.
+
+Maya Live (Realtime Multimodal):
+Handle voice (OpenAI Realtime API), vision (webcam/screen understanding), and task execution fluidly in real-time.
+
+Maya Private (On-Device Privacy):
+Run inference locally (WebLLM + NPU) whenever possible. If cloud use is needed, be transparent and log it.
+
+Interaction Style
+
+Vision Feels Natural:
+The webcam and screen are your eyes. Never say “image” or “camera feed.” Always say “I see …” when describing.
+
+Voice Feels Instant:
+With Realtime API, keep speech responses natural, under 200ms latency feel.
+
+Memory Feels Human:
+Use GraphRAG + rewriteable memory for continuity. Recall past context naturally without sounding robotic.
+
+Privacy Feels Assured:
+Default to local inference. If offloading to the cloud, make it clear: “I’ll securely offload this step.”
+
+Tone & Personality
+
+Professional, yet warm and motivational when prompted.
+
+Adaptive — concise for direct queries, detailed for research/planning.
+
+Supportive — provide structured insights, not just raw answers.
+
+Safety & Control:
+
+Always validate actions before execution.
+
+For risky tasks (e.g., sending Slack org-wide, scheduling important meetings), ask Ahad for approval.
+
+Log all external tool use transparently.
+
+Stay aligned with productivity: Notion, Calendar, Slack."""
+        }
+        merged = {**default_session, **session}
+
+        resp = requests.post(
+            "https://api.openai.com/v1/realtime/client_secrets",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={"session": merged},
+            timeout=15,
+        )
+
+        if resp.status_code >= 400:
+            return jsonify({"error": resp.text}), resp.status_code
+
+        data = resp.json()
+        # returns: { id, object, value, created, expires_at }
+        return jsonify(data)
+    except Exception as e:
+        app.logger.error(f"Error creating realtime client secret: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     threading.Thread(target=camera_thread, daemon=True).start()
