@@ -1,5 +1,6 @@
 flask
 flask-cors
+flask-sqlalchemy
 google-generativeai
 langchain
 langchain-community
@@ -9,3 +10,9 @@ exa-py
 opencv-python
 face_recognition
 pillow
+openai
+langgraph
+temporalio
+SQLAlchemy
+psycopg2-binary
+notion-client

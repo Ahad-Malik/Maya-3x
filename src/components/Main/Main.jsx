@@ -11,6 +11,7 @@ import ModernBlueWaveform from '../ModernBlueWaveform/ModernBlueWaveform';
 import AIProcessingAnimation from '../AIProcessingAnimation/AIProcessingAnimation';
 import ScheduleModal from '../Schedule/ScheduleModal';
 import HelpModal from '../HelpModal/HelpModal';
+import { executeMCP, searchNotionPages, readNotionPage, updateNotionPage, formatMCPError } from '../../lib/mcpClient';
 
 const StarField = React.memo(() => {
   const ref = useRef();
@@ -74,7 +75,9 @@ const Main = () => {
     showResult, 
     setShowResult,
     loading, 
-    resultData, 
+    resultData,
+    setResultData,
+    setRecentPrompt,
     setInput, 
     input, 
     visionMode, 
@@ -118,6 +121,9 @@ const Main = () => {
   const [activeMode, setActiveMode] = useState('chat');
   const [helpModalOpen, setHelpModalOpen] = useState(false);
   const [audioViewState, setAudioViewState] = useState('idle');
+  const [notionResults, setNotionResults] = useState(null);
+  const [notionLoading, setNotionLoading] = useState(false);
+  const [notionError, setNotionError] = useState(null);
 
   useEffect(() => {
     if (!isSessionLoading) {
@@ -274,6 +280,150 @@ const Main = () => {
     setAudioViewState(isRecording ? 'listening' : 'idle');
   }, [isRecording]);
 
+  // Notion MCP handlers
+  const handleSearchNotion = async () => {
+    const query = input.trim() || recentPrompt;
+    if (!query) {
+      setNotionError("Please enter a search query");
+      return;
+    }
+
+    setNotionLoading(true);
+    setNotionError(null);
+    setNotionResults(null);
+
+    try {
+      console.log('🔍 Searching Notion for:', query);
+      const result = await searchNotionPages(query);
+      console.log('📊 Notion search result:', result);
+      
+      if (result.success) {
+        setNotionResults(result.data);
+        
+        // Format results for display
+        if (result.data.results && result.data.results.length > 0) {
+          const resultsHtml = result.data.results.map((page, idx) => 
+            `<div style="margin: 15px 0; padding: 15px; background: rgba(255,255,255,0.05); border-radius: 10px; border-left: 3px solid #0d6cf7;">
+              <b>${idx + 1}. ${page.title}</b><br>
+              <span style="color: #9AA0A6; font-size: 14px;">� Last edited: ${new Date(page.last_edited_time).toLocaleDateString()}</span><br>
+              <a href="${page.url}" target="_blank" style="color: #00c9ff; text-decoration: none;">🔗 Open in Notion →</a>
+            </div>`
+          ).join('');
+          
+          const successMessage = `<div style="margin-bottom: 20px;">
+            <b style="color: #00ff88;">✅ Found ${result.data.count} Notion page${result.data.count !== 1 ? 's' : ''} for "${query}"</b>
+          </div>${resultsHtml}`;
+          
+          // Automatically read the first page content
+          const firstPage = result.data.results[0];
+          console.log('📖 Reading page content:', firstPage.id);
+          
+          let contentText = '';
+          try {
+            const pageContent = await readNotionPage(firstPage.id);
+            console.log('📄 Page content:', pageContent);
+            
+            if (pageContent.success && pageContent.data) {
+              const blocks = pageContent.data.blocks || [];
+              console.log('📦 Blocks received:', blocks.length);
+              
+              contentText = blocks.map(block => {
+                if (block.type === 'paragraph' && block.paragraph?.rich_text) {
+                  return block.paragraph.rich_text.map(t => t.plain_text).join('');
+                }
+                if (block.type === 'heading_1' && block.heading_1?.rich_text) {
+                  return '# ' + block.heading_1.rich_text.map(t => t.plain_text).join('');
+                }
+                if (block.type === 'heading_2' && block.heading_2?.rich_text) {
+                  return '## ' + block.heading_2.rich_text.map(t => t.plain_text).join('');
+                }
+                if (block.type === 'heading_3' && block.heading_3?.rich_text) {
+                  return '### ' + block.heading_3.rich_text.map(t => t.plain_text).join('');
+                }
+                if (block.type === 'bulleted_list_item' && block.bulleted_list_item?.rich_text) {
+                  return '• ' + block.bulleted_list_item.rich_text.map(t => t.plain_text).join('');
+                }
+                if (block.type === 'numbered_list_item' && block.numbered_list_item?.rich_text) {
+                  return '1. ' + block.numbered_list_item.rich_text.map(t => t.plain_text).join('');
+                }
+                if (block.type === 'code' && block.code?.rich_text) {
+                  return '```\n' + block.code.rich_text.map(t => t.plain_text).join('') + '\n```';
+                }
+                return '';
+              }).filter(text => text).join('\n\n');
+              
+              console.log('📝 Extracted content length:', contentText.length);
+            } else {
+              console.warn('⚠️ Failed to read page content:', pageContent);
+            }
+          } catch (readError) {
+            console.error('❌ Error reading page content:', readError);
+            contentText = '(Unable to load page content)';
+          }
+          
+          // Format the response with page info and content
+          const responseText = `Yes, I've found the Notion page titled "${firstPage.title}." I see it's located at: ${firstPage.url}\n\nIt was last edited on ${new Date(firstPage.last_edited_time).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}. ${contentText ? `\n\nHere's what's in the page:\n\n${contentText}` : '\n\n(This page appears to be empty or I don\'t have access to read its content.)'}\n\nWhat would you like to do with this page, Ahad? Would you like me to open it, summarize its content, or something else?`;
+          
+          // Set the user query and AI response directly (without calling processQuery)
+          setRecentPrompt(`Search Notion: ${query}`);
+          setResultData(responseText);
+          setShowResult(true);
+          setInput('');
+        } else {
+          setNotionError(`No Notion pages found matching "${query}"`);
+        }
+      } else {
+        setNotionError(result.error || "Search failed");
+      }
+    } catch (error) {
+      console.error('❌ Notion search error:', error);
+      setNotionError(formatMCPError(error));
+    } finally {
+      setNotionLoading(false);
+    }
+  };
+
+  const handleSendToNotion = async () => {
+    const content = input.trim() || resultData;
+    if (!content) {
+      setNotionError("No content to send to Notion");
+      return;
+    }
+
+    setNotionLoading(true);
+    setNotionError(null);
+
+    try {
+      // First search for a page, or you can allow user to specify page_id
+      // For now, we'll create/update based on a default page or show error
+      setNotionError("Please specify a Notion page ID for updates. Use search first to find pages.");
+    } catch (error) {
+      setNotionError(formatMCPError(error));
+    } finally {
+      setNotionLoading(false);
+    }
+  };
+
+  const handleUpdateNotionPage = async (pageId, data) => {
+    setNotionLoading(true);
+    setNotionError(null);
+
+    try {
+      const result = await updateNotionPage(pageId, data);
+      if (result.success) {
+        // Show success message
+        const successText = `✓ Updated Notion page: **${result.data.title}**`;
+        processQuery(successText, 'chat', false);
+      } else {
+        setNotionError(result.error || "Update failed");
+      }
+    } catch (error) {
+      setNotionError(formatMCPError(error));
+    } finally {
+      setNotionLoading(false);
+    }
+  };
+
   return (
     <div className='main'>
       <Background />
@@ -320,6 +470,58 @@ const Main = () => {
               onClick={handleScheduleOpen}
             />
           </div>
+          
+          {/* Notion MCP Buttons */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: '20px',
+            marginTop: '40px'
+          }}>
+            <button
+              className="card"
+              onClick={handleSearchNotion}
+              disabled={notionLoading}
+              style={{
+                opacity: notionLoading ? 0.6 : 1,
+                cursor: notionLoading ? 'not-allowed' : 'pointer',
+                width: '200px'
+              }}
+            >
+              <p>{notionLoading ? 'Searching...' : 'Search Notion'}</p>
+              <span style={{ fontSize: '24px' }}>🔍</span>
+            </button>
+            <button
+              className="card"
+              onClick={handleSendToNotion}
+              disabled={notionLoading}
+              style={{
+                opacity: notionLoading ? 0.6 : 1,
+                cursor: notionLoading ? 'not-allowed' : 'pointer',
+                width: '200px'
+              }}
+            >
+              <p>{notionLoading ? 'Sending...' : 'Send to Notion'}</p>
+              <span style={{ fontSize: '24px' }}>📝</span>
+            </button>
+          </div>
+
+          {notionError && (
+            <div style={{
+              marginTop: '20px',
+              padding: '15px 20px',
+              borderRadius: '12px',
+              background: 'rgba(255, 82, 82, 0.15)',
+              border: '1px solid rgba(255, 82, 82, 0.3)',
+              color: '#ff6b6b',
+              fontSize: '14px',
+              textAlign: 'center',
+              maxWidth: '600px',
+              margin: '20px auto'
+            }}>
+              {notionError}
+            </div>
+          )}
         </div>
 
         {/* Result View */}

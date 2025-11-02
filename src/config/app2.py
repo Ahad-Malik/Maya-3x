@@ -1,3 +1,10 @@
+import sys
+import os
+# Add project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from flask import Flask, request, jsonify, make_response, send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -38,6 +45,34 @@ app = Flask(__name__)
 CORS(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///tasks.db'
 db = SQLAlchemy(app)
+
+# Maya Studio blueprint and DB (LangGraph + Temporal scaffolding)
+try:
+    from src.maya_studio.api import maya_studio_bp
+    from src.maya_studio.models import db as studio_db
+
+    studio_db.init_app(app)
+    app.register_blueprint(maya_studio_bp)
+    with app.app_context():
+        studio_db.create_all()
+except Exception as _e:
+    # Avoid import failures breaking existing app; will log later if used
+    pass
+
+# MCP (Model Context Protocol) Integration
+mcp_enabled = False
+try:
+    from src.integrations.mcp.notion_mcp import get_notion_tool
+    from src.integrations.mcp.permissions import validate_mcp, validate_payload_schema, sanitize_payload, log_mcp_request
+    mcp_enabled = True
+    print("✓ MCP integrations loaded successfully")
+except ImportError as import_error:
+    print(f"Warning: MCP module import failed: {import_error}")
+    print("  Make sure notion-client is installed: pip install notion-client")
+except Exception as mcp_error:
+    print(f"Warning: MCP integrations not available: {mcp_error}")
+    import traceback
+    traceback.print_exc()
 
 face_recognition_enabled = False
 known_face_encodings = []
@@ -1108,6 +1143,88 @@ Stay aligned with productivity: Notion, Calendar, Slack."""
         return jsonify(data)
     except Exception as e:
         app.logger.error(f"Error creating realtime client secret: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# MCP Execute Endpoint
+@app.route('/mcp/execute', methods=['POST', 'OPTIONS'])
+def execute_mcp():
+    """
+    Execute MCP tool actions with validation and logging.
+    
+    Expected payload:
+    {
+        "tool": "notion",
+        "action": "search|read|update",
+        "query": "...",       # for search
+        "page_id": "...",     # for read/update
+        "data": {...}         # for update
+    }
+    """
+    try:
+        if request.method == 'OPTIONS':
+            return _build_cors_preflight_response()
+        
+        if not mcp_enabled:
+            return jsonify({
+                "error": "MCP integrations not available",
+                "details": "The MCP module failed to load. Check server console for details.",
+                "suggestion": "Ensure notion-client is installed: pip install notion-client"
+            }), 503
+        
+        # Get payload
+        payload = request.json
+        if not payload:
+            return jsonify({"error": "Missing request payload"}), 400
+        
+        # Extract tool and action
+        tool = payload.get("tool")
+        action = payload.get("action")
+        
+        if not tool:
+            return jsonify({"error": "Missing required field: 'tool'"}), 400
+        if not action:
+            return jsonify({"error": "Missing required field: 'action'"}), 400
+        
+        # Validate permissions
+        if not validate_mcp(tool, action):
+            log_mcp_request(tool, action, success=False)
+            return jsonify({
+                "error": f"Action '{action}' not allowed for tool '{tool}'"
+            }), 403
+        
+        # Validate payload schema
+        is_valid, error_msg = validate_payload_schema(tool, payload)
+        if not is_valid:
+            log_mcp_request(tool, action, success=False)
+            return jsonify({"error": error_msg}), 400
+        
+        # Sanitize payload
+        sanitized_payload = sanitize_payload(payload)
+        
+        # Execute tool
+        if tool == "notion":
+            notion_tool = get_notion_tool()
+            result = notion_tool.execute(sanitized_payload)
+            
+            # Log to memory if successful
+            if result.get("success"):
+                try:
+                    # Append MCP interaction to memory
+                    memory_entry = f"\n[MCP Notion {action}] Query: {sanitized_payload.get('query', 'N/A')}, Result: {result.get('data', {})}"
+                    append_to_data_file(memory_entry)
+                except Exception as mem_error:
+                    logger.warning(f"Failed to log MCP interaction to memory: {mem_error}")
+            
+            # Log request
+            log_mcp_request(tool, action, success=result.get("success", False))
+            
+            return jsonify(result)
+        else:
+            log_mcp_request(tool, action, success=False)
+            return jsonify({"error": f"Unknown tool: {tool}"}), 400
+    
+    except Exception as e:
+        logger.error(f"Error in MCP execute: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
