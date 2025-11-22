@@ -1,0 +1,8 @@
+{
+  "privacy_mode": "local",
+  "context_limit": 2000,
+  "offload_logging": true,
+  "webllm_model": "vicuna-7b",
+  "local_inference_enabled": true,
+  "cloud_fallback_enabled": true
+}

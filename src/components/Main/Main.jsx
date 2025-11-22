@@ -11,6 +11,7 @@ import ModernBlueWaveform from '../ModernBlueWaveform/ModernBlueWaveform';
 import AIProcessingAnimation from '../AIProcessingAnimation/AIProcessingAnimation';
 import ScheduleModal from '../Schedule/ScheduleModal';
 import HelpModal from '../HelpModal/HelpModal';
+import PrivatePanel from '../PrivatePanel/PrivatePanel';
 import { executeMCP, searchNotionPages, readNotionPage, updateNotionPage, formatMCPError } from '../../lib/mcpClient';
 
 const StarField = React.memo(() => {
@@ -124,6 +125,7 @@ const Main = () => {
   const [notionResults, setNotionResults] = useState(null);
   const [notionLoading, setNotionLoading] = useState(false);
   const [notionError, setNotionError] = useState(null);
+  const [mayaMode, setMayaMode] = useState('live'); // 'live', 'studio', 'private'
 
   useEffect(() => {
     if (!isSessionLoading) {
@@ -428,15 +430,60 @@ const Main = () => {
     <div className='main'>
       <Background />
       <div className="nav">
-        <p>Maya</p>
+        <div className="nav-left">
+          <p>Maya</p>
+          <div className="mode-switcher">
+            <button 
+              className={`mode-btn ${mayaMode === 'live' ? 'active' : ''}`}
+              onClick={() => setMayaMode('live')}
+            >
+              Live
+            </button>
+            <button 
+              className={`mode-btn ${mayaMode === 'studio' ? 'active' : ''}`}
+              onClick={() => setMayaMode('studio')}
+            >
+              Studio
+            </button>
+            <button 
+              className={`mode-btn ${mayaMode === 'private' ? 'active' : ''}`}
+              onClick={() => setMayaMode('private')}
+            >
+              🔒 Private
+            </button>
+          </div>
+        </div>
         <div className="nav-icons">
-          <button onClick={toggleAudioMode} className="audio-toggle">
-          <img src={audioMode ? assets.text : assets.sound} alt="Toggle audio mode"/>
-          </button>
+          {mayaMode === 'live' && (
+            <button onClick={toggleAudioMode} className="audio-toggle">
+              <img src={audioMode ? assets.text : assets.sound} alt="Toggle audio mode"/>
+            </button>
+          )}
           <img src={assets.user_icon} alt=''/>
         </div>
       </div>
       <div className={`main-container ${showResult && !audioMode ? 'result-view' : audioMode ? 'audio-view' : 'default'}`}>
+        {/* Maya Private Panel */}
+        {mayaMode === 'private' && (
+          <div className="private-mode-container">
+            <PrivatePanel />
+          </div>
+        )}
+
+        {/* Maya Studio Panel */}
+        {mayaMode === 'studio' && (
+          <div className="studio-mode-container">
+            <div className="coming-soon">
+              <h2>🎬 Maya Studio</h2>
+              <p>Multi-step workflows with LangGraph + Temporal</p>
+              <p className="status">Coming in this view...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Maya Live - Default View */}
+        {mayaMode === 'live' && (
+          <>
         {/* Default View */}
         <div className={`default-view ${!showResult && !audioMode ? '' : 'hidden'}`}>
           <div className="content-wrapper">
@@ -583,8 +630,11 @@ const Main = () => {
           </div>
       </div>
       {isAIProcessing && <AIProcessingAnimation />}
+          </>
+        )}
       </div>
 
+      {mayaMode === 'live' && (
       <div className="main_bottom">
         {!audioMode ? (
           <div className="search-box">
@@ -607,6 +657,7 @@ const Main = () => {
           </div>
         )}
       </div>
+      )}
       
       <Modal
         show={modalOpen}

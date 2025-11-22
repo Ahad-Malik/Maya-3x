@@ -59,6 +59,25 @@ except Exception as _e:
     # Avoid import failures breaking existing app; will log later if used
     pass
 
+# Maya Private - Privacy Manager
+privacy_enabled = False
+try:
+    import sys
+    import os
+    # Add config directory to Python path for privacy imports
+    config_dir = os.path.dirname(os.path.abspath(__file__))
+    if config_dir not in sys.path:
+        sys.path.insert(0, config_dir)
+    
+    from privacy.manager import bp as privacy_bp
+    app.register_blueprint(privacy_bp, url_prefix="/privacy")
+    privacy_enabled = True
+    print("✓ Maya Private mode initialized successfully")
+except Exception as privacy_error:
+    print(f"Warning: Maya Private mode not available: {privacy_error}")
+    import traceback
+    traceback.print_exc()
+
 # MCP (Model Context Protocol) Integration
 mcp_enabled = False
 try:

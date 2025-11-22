@@ -15,4 +15,18 @@ langgraph
 temporalio
 SQLAlchemy
 psycopg2-binary
-notion-client
+notion-client==2.2.1
+jsonschema==4.22.0
+
+# Evaluation harness dependencies
+pytest
+pandas
+matplotlib
+
+# Maya Private - Local Inference Dependencies
+# For local inference support (optional, install based on hardware)
+# transformers>=4.30.0
+# torch>=2.0.0
+# TinyLlama support (uncomment if using local inference)
+# accelerate>=0.20.0
+# bitsandbytes>=0.41.0

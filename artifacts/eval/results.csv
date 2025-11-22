@@ -1,0 +1,4 @@
+System,TaskCompletionRate_pct,WorkflowRecoveryRate_pct,LocalProcessingRatio_pct,MemoryRetrievalAccuracy_pct,SecurityDetectionAccuracy_pct,AvgLatency_ms
+Maya-3x,98.0,96.0,98.13084112149532,94.11764705882352,95.0,269.41440735650184
+Maya-1x,86.0,82.0,70.09345794392523,60.0,80.0,431.7332676014364
+Baseline Agent,70.0,50.0,24.299065420560748,54.11764705882353,61.25000000000001,568.1855607305332
