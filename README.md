@@ -1,6 +1,15 @@
 # Secure, Durable, and Future-Ready Agentic Assistant
 
-This project presents **Maya 3×**, a next-generation agentic assistant designed to overcome key limitations in modern AI assistants related to durability, privacy, and structured tool integration.
+## 🌱 Origins of Maya
+
+Maya initially started as a personal research prototype—now referred to as **Maya Classic**—designed to explore early ideas around multimodal interaction, persistent memory, and autonomous task execution. Developed entirely as a **solo project**, Maya Classic was selected for the **Google Gemini API Developer Competition**, where it gained recognition for its agentic capabilities and real-time contextual reasoning.
+
+🔗 **Project Link:** *https://ai.google.dev/competition/projects/maya*
+
+However, the experience also revealed the architectural gaps that modern AI assistants struggle with—durability, privacy, and reliable tool integration. These insights led to a complete redesign, resulting in **Maya 3×**: not just an upgrade, but a fundamentally new system with a **tri-track architecture** that supports durable multi-agent workflows, real-time multimodal interaction, and offline private inference.
+
+Where Maya Classic proved what was possible, **Maya 3×** demonstrates what is practical, production-ready, and future-proof.
+
 
 ## 🚀 Overview
 
